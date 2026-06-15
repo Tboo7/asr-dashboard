@@ -1,0 +1,633 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ASR Rules Implementation - Public Safe</title>
+<style>
+  :root{
+    --bg:#15161a;
+    --bg2:#1b1d22;
+    --card:#212329;
+    --card-hover:#262932;
+    --line:#30333b;
+    --line-soft:#272a31;
+    --txt:#e9eaee;
+    --txt-2:#9aa0ab;
+    --txt-3:#6b7079;
+    --high:#e5484d; --high-soft:rgba(229,72,77,.14); --high-txt:#ff7a7e;
+    --med:#e0a83b;  --med-soft:rgba(224,168,59,.14);  --med-txt:#f1c469;
+    --safe:#46a758; --safe-soft:rgba(70,167,88,.15);  --safe-txt:#62d178;
+    --accent:#4aa3ff;
+    --inset:#101114;
+    --inset-2:#0e0f12;
+    --code-txt:#cdd3dc;
+    --glow:rgba(74,163,255,.07);
+    --scroll:#30333b;
+    --radius:10px;
+    --mono:"SFMono-Regular",ui-monospace,"Cascadia Code","Consolas",monospace;
+    --ui:"Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+  }
+  html[data-theme="light"]{
+    --bg:#eef3fa;
+    --bg2:#ffffff;
+    --card:#ffffff;
+    --card-hover:#f3f7fd;
+    --line:#cdd9e8;
+    --line-soft:#e2e9f3;
+    --txt:#16243c;
+    --txt-2:#566480;
+    --txt-3:#8a97ac;
+    --high:#e5484d; --high-soft:rgba(229,72,77,.10); --high-txt:#c8323a;
+    --med:#d9941f;  --med-soft:rgba(217,148,31,.14);  --med-txt:#a06408;
+    --safe:#2f9e44; --safe-soft:rgba(47,158,68,.12);  --safe-txt:#1f7a32;
+    --accent:#2563eb;
+    --inset:#eef3fa;
+    --inset-2:#f1f6fc;
+    --code-txt:#22324d;
+    --glow:rgba(37,99,235,.08);
+    --scroll:#c3cfdf;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    transition:background .25s,color .25s;
+    background:
+      radial-gradient(1100px 500px at 80% -10%, var(--glow), transparent 60%),
+      var(--bg);
+    color:var(--txt);
+    font-family:var(--ui);
+    -webkit-font-smoothing:antialiased;
+    line-height:1.45;
+    min-height:100vh;
+  }
+  .wrap{max-width:880px;margin:0 auto;padding:28px 18px 80px}
+
+  /* ---------- header ---------- */
+  header.top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:6px}
+  .titleblock h1{font-size:22px;font-weight:650;letter-spacing:-.01em;margin:0}
+  .titleblock p{margin:4px 0 0;color:var(--txt-2);font-size:13.5px}
+  .updated{color:var(--txt-3);font-size:12px;margin-top:6px}
+  .window{color:var(--txt-2);font-size:12px;margin-top:3px}
+  .window b{color:var(--txt);font-weight:600}
+  .window .note{color:var(--txt-3)}
+
+  .toolbar{display:flex;gap:8px;align-items:center}
+  .theme-btn{
+    display:inline-flex;align-items:center;gap:7px;background:var(--bg2);border:1px solid var(--line-soft);
+    border-radius:8px;padding:7px 11px;cursor:pointer;color:var(--txt-2);font-family:var(--ui);font-size:12px;font-weight:600;transition:.15s;
+  }
+  .theme-btn:hover{color:var(--txt);border-color:var(--line)}
+  .theme-btn svg{width:15px;height:15px}
+  .theme-btn .sun{display:none}
+  html[data-theme="light"] .theme-btn .sun{display:block}
+  html[data-theme="light"] .theme-btn .moon{display:none}
+
+  .devs{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;max-height:152px;overflow:auto;padding-right:4px}
+  .devs::-webkit-scrollbar{width:8px}
+  .devs::-webkit-scrollbar-thumb{background:var(--scroll);border-radius:5px}
+  .dev{font-family:var(--mono);font-size:11px;background:var(--inset);border:1px solid var(--line-soft);color:var(--txt-2);padding:3px 8px;border-radius:5px;white-space:nowrap}
+  .devmore{font-size:11.5px;color:var(--txt-3);align-self:center;margin-left:2px}
+
+  /* ---------- summary meter ---------- */
+  .summary{
+    margin:22px 0 26px;background:var(--bg2);border:1px solid var(--line-soft);
+    border-radius:var(--radius);padding:18px 20px;
+  }
+  .summary-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .summary-head .label{font-size:13px;color:var(--txt-2);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+  .pct{font-variant-numeric:tabular-nums}
+  .pct b{font-size:34px;font-weight:680;letter-spacing:-.02em}
+  .pct span{color:var(--txt-2);font-size:14px;margin-left:6px}
+  .meter{height:12px;border-radius:7px;background:var(--inset);overflow:hidden;display:flex;margin:14px 0 12px;border:1px solid var(--line-soft)}
+  .meter i{display:block;height:100%;transition:width .6s cubic-bezier(.2,.7,.2,1)}
+  .seg-enforced{background:linear-gradient(90deg,#3f9c52,#5fcf72)}
+  .seg-transition{background:linear-gradient(90deg,#caa544,#f1c469)}
+  .seg-audit{background:linear-gradient(90deg,#3a6ea8,#5d94d6)}
+  .legend{display:flex;flex-wrap:wrap;gap:14px 22px;font-size:12.5px;color:var(--txt-2)}
+  .legend div{display:flex;align-items:center;gap:7px}
+  .dot{width:9px;height:9px;border-radius:3px;display:inline-block}
+  .d-enf{background:#5fcf72}.d-tra{background:#f1c469}.d-aud{background:#5d94d6}.d-noh{background:#c7ccd4}.d-non{background:#4b515b}
+  .legend b{color:var(--txt);font-variant-numeric:tabular-nums}
+
+  /* ---------- rule cards ---------- */
+  .list{display:flex;flex-direction:column;gap:9px}
+  .card{
+    position:relative;background:var(--card);border:1px solid var(--line-soft);
+    border-radius:var(--radius);overflow:hidden;transition:background .15s,border-color .15s;
+  }
+  .card:hover{background:var(--card-hover)}
+  .card .bar{position:absolute;left:0;top:0;bottom:0;width:4px}
+  .bar.high{background:var(--high)}.bar.med{background:var(--med)}.bar.safe{background:var(--safe)}
+  .row{display:flex;align-items:center;gap:14px;padding:15px 16px 15px 20px;cursor:pointer;user-select:none}
+  .row .name{font-size:15px;font-weight:600;line-height:1.3}
+  .row .sub{margin-top:4px;font-size:12.5px;color:var(--txt-2);font-variant-numeric:tabular-nums}
+  .row .sub .sep{color:var(--txt-3);margin:0 7px}
+  .grow{flex:1;min-width:0}
+  .pill{flex:none;font-size:11.5px;font-weight:650;padding:5px 11px;border-radius:999px;white-space:nowrap;letter-spacing:.01em}
+  .pill.high{background:var(--high-soft);color:var(--high-txt)}
+  .pill.med{background:var(--med-soft);color:var(--med-txt)}
+  .pill.safe{background:var(--safe-soft);color:var(--safe-txt)}
+  .chev{flex:none;color:var(--txt-3);transition:transform .2s;width:16px;height:16px}
+  .card.open .chev{transform:rotate(180deg)}
+
+  /* ---------- expanded detail ---------- */
+  .detail{display:none;padding:2px 20px 18px 20px;border-top:1px solid var(--line-soft);margin-top:-1px}
+  .card.open .detail{display:block;animation:fade .22s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin:16px 0 6px}
+  .stat .k{font-size:11px;color:var(--txt-3);text-transform:uppercase;letter-spacing:.05em}
+  .stat .v{font-size:15px;font-weight:600;margin-top:3px;font-variant-numeric:tabular-nums}
+  .modechip{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:3px 9px;border-radius:6px;background:var(--inset);border:1px solid var(--line)}
+  .modechip .md{width:8px;height:8px;border-radius:50%}
+  .rec{background:var(--inset);border:1px solid var(--line-soft);border-left:3px solid var(--med);border-radius:7px;padding:11px 13px;font-size:13px;color:var(--txt);margin:8px 0 14px}
+  .rec.high{border-left-color:var(--high)}.rec.med{border-left-color:var(--med)}.rec.safe{border-left-color:var(--safe)}
+  .procs{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .proc{font-family:var(--mono);font-size:11.5px;background:var(--inset);border:1px solid var(--line);color:var(--txt-2);padding:3px 8px;border-radius:5px}
+  .metarow{display:flex;flex-wrap:wrap;gap:18px;align-items:center;margin-top:16px;padding-top:14px;border-top:1px solid var(--line-soft)}
+  .guid{font-family:var(--mono);font-size:11.5px;color:var(--txt-3)}
+  .mslink{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--accent);text-decoration:none;white-space:nowrap}
+  .mslink:hover{text-decoration:underline}
+  .seen{font-size:12px;color:var(--txt-2)}
+
+  /* ---------- upload ---------- */
+  .uploadbar{margin:26px 0 4px;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+  .btn-clear{
+    display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:transparent;
+    color:var(--txt-2);font-family:var(--ui);font-size:13px;padding:11px 16px;border-radius:9px;cursor:pointer;transition:.15s;
+  }
+  .btn-clear:hover{border-color:var(--high);color:var(--high-txt);background:rgba(229,72,77,.06)}
+  .btn-clear svg{width:15px;height:15px}
+  .empty{border:1px dashed var(--line);border-radius:var(--radius);padding:34px 20px;text-align:center;color:var(--txt-3);font-size:13.5px}
+
+  /* ---------- KQL disclosure ---------- */
+  .kql{margin-top:14px;background:var(--card);border:1px solid var(--line-soft);border-radius:var(--radius);overflow:hidden}
+  .kql-head{display:flex;align-items:center;gap:12px;padding:14px 18px;cursor:pointer;user-select:none}
+  .kql-head .ico{width:16px;height:16px;color:var(--accent);flex:none}
+  .kql-head .lbl{font-size:14px;font-weight:600;flex:1}
+  .kql-head .chev{width:16px;height:16px;color:var(--txt-3);transition:transform .2s}
+  .kql.open .kql-head .chev{transform:rotate(180deg)}
+  .kql-body{display:none;border-top:1px solid var(--line-soft)}
+  .kql.open .kql-body{display:block}
+  .kql-tools{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 14px;background:var(--inset-2)}
+  .kql-src{font-size:11px;color:var(--txt-3);font-family:var(--mono)}
+  .copy{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--card);color:var(--txt-2);
+    font-family:var(--ui);font-size:12px;font-weight:600;padding:6px 11px;border-radius:7px;cursor:pointer;transition:.15s}
+  .copy:hover{color:var(--txt);border-color:var(--accent)}
+  .copy.ok{color:var(--safe-txt);border-color:var(--safe)}
+  .kql pre{margin:0;padding:16px 18px;overflow:auto;max-height:440px;background:var(--inset-2);
+    font-family:var(--mono);font-size:12px;line-height:1.55;color:var(--code-txt);tab-size:4;white-space:pre}
+  .kql pre::-webkit-scrollbar{height:9px;width:9px}
+  .kql pre::-webkit-scrollbar-thumb{background:var(--scroll);border-radius:5px}
+  .drop{
+    display:flex;align-items:center;gap:10px;border:1px dashed var(--line);background:var(--bg2);
+    color:var(--txt-2);font-size:13px;padding:11px 16px;border-radius:9px;cursor:pointer;transition:.15s;
+  }
+  .drop:hover,.drop.drag{border-color:var(--accent);color:var(--txt);background:var(--card-hover)}
+  .drop svg{width:16px;height:16px;color:var(--txt-2)}
+  .drop.drag svg,.drop:hover svg{color:var(--accent)}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);
+    background:var(--inset);border:1px solid var(--line);color:var(--txt);padding:11px 18px;border-radius:9px;
+    font-size:13px;opacity:0;pointer-events:none;transition:.25s;box-shadow:0 10px 30px rgba(0,0,0,.5);z-index:20}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast.err{border-color:var(--high);color:var(--high-txt)}
+  footer{margin-top:40px;color:var(--txt-3);font-size:11.5px;text-align:center;line-height:1.7}
+  footer a{color:var(--txt-2)}
+  @media (max-width:560px){
+    .row{padding:14px 13px 14px 16px;gap:10px}
+    .pill{font-size:10.5px;padding:4px 8px}
+    .titleblock h1{font-size:19px}
+    .pct b{font-size:28px}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="titleblock">
+      <h1 id="t-title">ASR Rules Implementation</h1>
+      <p id="t-sub">Attack Surface Reduction — deployment progress</p>
+      <div class="updated"><span id="t-updated">Last data update</span>: <span id="lastUpdate">—</span></div>
+      <div class="window"><span id="t-window">Data window</span>: <b id="dataWindow">—</b> <span class="note" id="t-windownote"></span></div>
+    </div>
+    <div class="toolbar">
+      <button class="theme-btn" id="theme" type="button" aria-label="Toggle theme">
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <span id="t-theme">Light</span>
+      </button>
+    </div>
+  </header>
+
+  <section class="summary">
+    <div class="summary-head">
+      <span class="label" id="t-overall">Overall implementation</span>
+      <span class="pct"><b id="pctNum">0%</b><span id="t-complete">complete</span></span>
+    </div>
+    <div class="meter" id="meter">
+      <i class="seg-enforced" id="segEnf" style="width:0"></i>
+      <i class="seg-transition" id="segTra" style="width:0"></i>
+      <i class="seg-audit" id="segAud" style="width:0"></i>
+    </div>
+    <div class="legend">
+      <div><span class="dot d-enf"></span><span id="t-enf">Enforced</span> <b id="cEnf">0</b></div>
+      <div><span class="dot d-tra"></span><span id="t-tra">Transitioning</span> <b id="cTra">0</b></div>
+      <div><span class="dot d-aud"></span><span id="t-aud">Monitoring</span> <b id="cAud">0</b></div>
+      <div><span class="dot d-noh"></span><span id="t-noh">No hits</span> <b id="cNoh">0</b></div>
+      <div><span class="dot d-non"></span><span id="t-non">Not configured</span> <b id="cNon">0</b></div>
+    </div>
+  </section>
+
+  <div class="list" id="list"></div>
+
+  <div class="kql" id="kql">
+    <div class="kql-head" role="button" tabindex="0" aria-expanded="false">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+      <span class="lbl" id="t-kql">Show KQL query</span>
+      <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <div class="kql-body">
+      <div class="kql-tools">
+        <span class="kql-src" id="t-kqlsrc">Microsoft Defender · Advanced hunting</span>
+        <button class="copy" id="copyKql" type="button">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <span id="t-copy">Copy</span>
+        </button>
+      </div>
+      <pre id="kqlCode"></pre>
+    </div>
+  </div>
+
+  <div class="uploadbar">
+    <button class="btn-clear" id="clear" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+      <span id="t-clear">Clear tables</span>
+    </button>
+    <label class="drop" id="drop">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      <span id="t-upload">Upload new CSV</span>
+      <input type="file" id="file" accept=".csv,text/csv" hidden>
+    </label>
+  </div>
+
+  <footer>
+    <span id="t-foot">Data parsed locally in your browser. Links open the official Microsoft Defender ASR rules reference.</span><br>
+    <span id="t-count">0</span> · <a href="https://learn.microsoft.com/en-us/defender-endpoint/attack-surface-reduction-rules-reference" target="_blank" rel="noopener">Microsoft Learn — ASR rules reference</a>
+  </footer>
+</div>
+<div class="toast" id="toast"></div>
+
+<script id="kqlsrc" type="text/plain">
+let AsrRuleNames = datatable(RuleId: string, RuleName: string) [
+    "56a863a9-875e-4185-98a7-b882c64b5ce5", "Block abuse of exploited vulnerable signed drivers",
+    "7674ba52-37eb-4a4f-a9a1-f0f9a1619a2c", "Block Adobe Reader from creating child processes",
+    "d4f940ab-401b-4efc-aadc-ad5f3c50688a", "Block all Office applications from creating child processes",
+    "9e6c4e1f-7d60-472f-ba1a-a39ef669e4b2", "Block credential stealing from the Windows local security authority subsystem",
+    "be9ba2d9-53ea-4cdc-84e5-9b1eeee46550", "Block executable content from email client and webmail",
+    "01443614-cd74-433a-b99e-2ecdc07bfc25", "Block executable files from running unless they meet a prevalence, age, or trusted list criterion",
+    "5beb7efe-fd9a-4556-801d-275e5ffc04cc", "Block execution of potentially obfuscated scripts",
+    "d3e037e1-3eb8-44c8-a917-57927947596d", "Block JavaScript or VBScript from launching downloaded executable content",
+    "3b576869-a4ec-4529-8536-b80a7769e899", "Block Office applications from creating executable content",
+    "75668c1f-73b5-4cf0-bb93-3ecf5cb7cc84", "Block Office applications from injecting code into other processes",
+    "26190899-1602-49e8-8b27-eb1d0a1ce869", "Block Office communication application from creating child processes",
+    "e6db77e5-3df2-4cf1-b95a-636979351e5b", "Block persistence through WMI event subscription",
+    "d1e49aac-8f56-4280-b9ba-993a6d77406c", "Block process creations originating from PSExec and WMI commands",
+    "b2b3f03d-6a65-4f7b-a9c7-1c7ef74a9ba4", "Block untrusted and unsigned processes that run from USB",
+    "92e97fa1-2edf-4476-bdd6-9dd0b4dddc7b", "Block Win32 API calls from Office macros",
+    "c1db55ab-c21a-4637-bb3f-a12568109d35", "Use advanced protection against ransomware",
+    "c0033c00-d16d-4114-a5a0-dc9b3a7d2ceb", "Block use of copied or impersonated system tools",
+    "a8f5898e-1dc8-49a9-9878-85004b8a61e6", "Block Webshell creation for Servers",
+    "33ddedf1-c6e0-47cb-833e-de6133960387", "Block rebooting machine in Safe Mode"
+];
+let Clients = DeviceInfo
+    | where OSPlatform == "Windows10" or OSPlatform == "Windows11"
+    | distinct DeviceId;
+let AsrEvents = DeviceEvents
+    | where DeviceId in (Clients)
+    | where ActionType startswith "Asr"
+    | where ActionType contains "Audited" or ActionType contains "Blocked"
+    | extend AF = parse_json(AdditionalFields)
+    | extend RuleId = tolower(tostring(AF.RuleId))
+    | extend Mode = iff(ActionType contains "Blocked", "Block", "Audit")
+    | summarize
+        TotalHits          = count(),
+        BlockedCount       = countif(Mode == "Block"),
+        AuditedCount       = countif(Mode == "Audit"),
+        AffectedDevices    = dcount(DeviceName),
+        AffectedDeviceList = make_set(DeviceName, 100),
+        UniqueProcesses    = dcount(InitiatingProcessFileName),
+        SampleProcesses    = make_set(InitiatingProcessFileName, 5),
+        FirstSeen          = min(Timestamp),
+        LastSeen           = max(Timestamp)
+        by RuleId;
+AsrRuleNames
+| join kind=leftouter AsrEvents on RuleId
+| extend TotalHits       = coalesce(TotalHits, 0)
+| extend BlockedCount    = coalesce(BlockedCount, 0)
+| extend AuditedCount    = coalesce(AuditedCount, 0)
+| extend AffectedDevices = coalesce(AffectedDevices, 0)
+| extend CurrentMode = case(
+    BlockedCount > 0 and AuditedCount == 0, "🔴 Block",
+    BlockedCount > 0 and AuditedCount > 0,  "🟠 Block + Audit",
+    AuditedCount > 0,                        "🟡 Audit",
+    "⚪ No hits"
+)
+| extend RiskToBlock = case(
+    AuditedCount > 500 or AffectedDevices > 20, "🔴 High impact - do not block yet",
+    AuditedCount > 50  or AffectedDevices > 5,  "🟡 Medium impact - investigate first",
+    AuditedCount > 0,                            "🟢 Low impact - safe to block",
+    "🟢 No audit hits - safe to block"
+)
+| extend Advice = case(
+    BlockedCount > 0 and AuditedCount == 0,      "Rule is in block mode and working — monitor for false positives",
+    AuditedCount > 500 or AffectedDevices > 20,  "Identify legitimate processes in SampleProcesses and add exclusions before enabling block mode",
+    AuditedCount > 50  or AffectedDevices > 5,   "Verify the processes listed are legitimate — then enable block mode",
+    AuditedCount > 0,                             "Enable block mode and monitor for 48h",
+    "Enable block mode immediately"
+)
+| project
+    RuleName,
+    CurrentMode,
+    TotalHits,
+    BlockedCount,
+    AuditedCount,
+    AffectedDevices,
+    AffectedDeviceList,
+    UniqueProcesses,
+    RiskToBlock,
+    Advice,
+    SampleProcesses,
+    FirstSeen,
+    LastSeen
+| order by AffectedDevices desc, TotalHits desc
+</script>
+<script>
+/* ============== rule metadata: GUID + Microsoft Learn anchor ============== */
+const RULES = {"Block credential stealing from the Windows local security authority subsystem": ["9e6c4e1f-7d60-472f-ba1a-a39ef669e4b2", "block-credential-stealing-from-the-windows-local-security-authority-subsystem"], "Block use of copied or impersonated system tools": ["c0033c00-d16d-4114-a5a0-dc9b3a7d2ceb", "block-use-of-copied-or-impersonated-system-tools"], "Block executable files from running unless they meet a prevalence, age, or trusted list criterion": ["01443614-cd74-433a-b99e-2ecdc07bfc25", "block-executable-files-from-running-unless-they-meet-a-prevalence-age-or-trusted-list-criterion"], "Block Office communication application from creating child processes": ["26190899-1602-49e8-8b27-eb1d0a1ce869", "block-office-communication-application-from-creating-child-processes"], "Block Office applications from injecting code into other processes": ["75668c1f-73b5-4cf0-bb93-3ecf5cb7cc84", "block-office-applications-from-injecting-code-into-other-processes"], "Block all Office applications from creating child processes": ["d4f940ab-401b-4efc-aadc-ad5f3c50688a", "block-all-office-applications-from-creating-child-processes"], "Block process creations originating from PSExec and WMI commands": ["d1e49aac-8f56-4280-b9ba-993a6d77406c", "block-process-creations-originating-from-psexec-and-wmi-commands"], "Block Adobe Reader from creating child processes": ["7674ba52-37eb-4a4f-a9a1-f0f9a1619a2c", "block-adobe-reader-from-creating-child-processes"], "Block executable content from email client and webmail": ["be9ba2d9-53ea-4cdc-84e5-9b1eeee46550", "block-executable-content-from-email-client-and-webmail"], "Block Office applications from creating executable content": ["3b576869-a4ec-4529-8536-b80a7769e899", "block-office-applications-from-creating-executable-content"], "Block Win32 API calls from Office macros": ["92e97fa1-2edf-4476-bdd6-9dd0b4dddc7b", "block-win32-api-calls-from-office-macros"], "Use advanced protection against ransomware": ["c1db55ab-c21a-4637-bb3f-a12568109d35", "use-advanced-protection-against-ransomware"], "Block abuse of exploited vulnerable signed drivers": ["56a863a9-875e-4185-98a7-b882c64b5ce5", "block-abuse-of-exploited-vulnerable-signed-drivers"], "Block untrusted and unsigned processes that run from USB": ["b2b3f03d-6a65-4f7b-a9c7-1c7ef74a9ba4", "block-untrusted-and-unsigned-processes-that-run-from-usb"], "Block rebooting machine in Safe Mode": ["33ddedf1-c6e0-47cb-833e-de6133960387", "block-rebooting-machine-in-safe-mode"], "Block persistence through WMI event subscription": ["e6db77e5-3df2-4cf1-b95a-636979351e5b", "block-persistence-through-wmi-event-subscription"], "Block Webshell creation for Servers": ["a8f5898e-1dc8-49a9-9878-85004b8a61e6", "block-webshell-creation-for-servers"], "Block JavaScript or VBScript from launching downloaded executable content": ["d3e037e1-3eb8-44c8-a917-57927947596d", "block-javascript-or-vbscript-from-launching-downloaded-executable-content"], "Block execution of potentially obfuscated scripts": ["5beb7efe-fd9a-4556-801d-275e5ffc04cc", "block-execution-of-potentially-obfuscated-scripts"]};
+const MS_BASE = "https://learn.microsoft.com/en-us/defender-endpoint/attack-surface-reduction-rules-reference";
+
+/* ============== English UI strings ============== */
+const STRINGS = {
+  title:"ASR Rules Implementation",
+  sub:"Attack Surface Reduction — deployment progress",
+  updated:"Last data update",
+  window:"Data window",
+  days:"days",
+  day:"day",
+  windowNote:n=>`(default hunting look-back: 30 days)`,
+  themeLight:"Light",
+  themeDark:"Dark",
+  affList:"Affected devices",
+  moreDev:n=>`+${n} more`,
+  overall:"Overall implementation",
+  complete:"complete",
+  hits:"hits",
+  devices:"devices",
+  processes:"processes",
+  enf:"Enforced",
+  tra:"Transitioning",
+  aud:"Monitoring",
+  noh:"No hits",
+  non:"Not configured",
+  mode:"Current mode",
+  blocked:"Blocked",
+  audited:"Audited",
+  affdev:"Affected devices",
+  uproc:"Unique processes",
+  sample:"Sample processes",
+  first:"First seen",
+  last:"Last seen",
+  rec:"Recommendation",
+  mslink:"View on Microsoft Learn",
+  guid:"Rule GUID",
+  upload:"Upload new CSV",
+  foot:"Data parsed locally in your browser. Links open the official Microsoft Defender ASR rules reference.",
+  count:n=>`${n} rules loaded`,
+  mAudit:"Audit",
+  mBlockAudit:"Block + Audit",
+  mBlock:"Block",
+  mNoHits:"No hits",
+  mNone:"Not configured",
+  clear:"Clear tables",
+  cleared:"Tables cleared",
+  empty:"No data loaded. Upload a CSV export to populate the tables.",
+  kql:"Show KQL query",
+  kqlSrc:"Microsoft Defender · Advanced hunting",
+  copy:"Copy",
+  copied:"Copied",
+  iHigh:"High impact",
+  iMed:"Medium impact",
+  iSafe:"Safe to block",
+  recHigh:"Identify the legitimate processes below and add exclusions before switching this rule to Block.",
+  recMed:"Verify the processes below are legitimate, then enable Block mode.",
+  recSafe:"Enable Block mode and monitor for 48 hours.",
+  okMsg:n=>`Loaded ${n} rules from CSV`,
+  errMsg:"Could not read that CSV. Check the column headers."
+};
+
+/* ============== RFC4180 CSV parser (handles quotes, embedded commas/JSON) ============== */
+function parseCSV(text){
+  text = text.replace(/^\uFEFF/,"");
+  const rows=[]; let row=[], field="", q=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(q){
+      if(c==='"'){ if(text[i+1]==='"'){field+='"';i++;} else q=false; }
+      else field+=c;
+    }else{
+      if(c==='"') q=true;
+      else if(c===','){ row.push(field); field=""; }
+      else if(c==='\r'){ /* skip */ }
+      else if(c==='\n'){ row.push(field); rows.push(row); row=[]; field=""; }
+      else field+=c;
+    }
+  }
+  if(field.length||row.length){ row.push(field); rows.push(row); }
+  if(!rows.length) return [];
+  const head=rows[0].map(h=>h.trim());
+  return rows.slice(1).filter(r=>r.length>1 && r.some(x=>x!=="")).map(r=>{
+    const o={}; head.forEach((h,i)=>o[h]=(r[i]??"").trim()); return o;
+  });
+}
+function jsonList(s){ try{ const v=JSON.parse(s); return Array.isArray(v)?v:[]; }catch{ return []; } }
+function num(s){ const n=parseInt(String(s).replace(/[^\d-]/g,""),10); return isNaN(n)?0:n; }
+
+/* classify impact from RiskToBlock, mode from CurrentMode */
+function impactOf(r){ const t=(r.RiskToBlock||"").toLowerCase();
+  if(t.includes("high"))return"high"; if(t.includes("medium"))return"med"; return"safe"; }
+function modeOf(r){ const t=(r.CurrentMode||"").toLowerCase();
+  const b=t.includes("block"), a=t.includes("audit");
+  if(b&&a)return"blockaudit"; if(b)return"block"; if(a)return"audit";
+  if(t.includes("no hit"))return"nohits"; return"none"; }
+const MODE_WEIGHT={block:1,blockaudit:.75,audit:.5,nohits:0,none:0};
+
+/* ============== state ============== */
+let DATA=[];
+
+function loadSeed(){
+  // Public-safe build: no embedded Defender/tenant data.
+  DATA=[];
+}
+
+/* ============== rendering ============== */
+function fmt(n){ return Number(n).toLocaleString("en-US"); }
+function esc(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+function render(){
+  const T=STRINGS;
+  // static strings
+  document.documentElement.lang="en";
+  document.title=T.title;
+  set("t-title",T.title); set("t-sub",T.sub); set("t-updated",T.updated);
+  set("t-overall",T.overall); set("t-complete",T.complete);
+  set("t-enf",T.enf); set("t-tra",T.tra); set("t-aud",T.aud); set("t-noh",T.noh); set("t-non",T.non);
+  set("t-upload",T.upload); set("t-clear",T.clear); set("t-foot",T.foot); set("t-count",T.count(DATA.length));
+  set("t-kql",T.kql); set("t-kqlsrc",T.kqlSrc); set("t-copy",T.copy);
+  set("t-window",T.window); set("t-theme", document.documentElement.getAttribute("data-theme")==="light"?T.themeDark:T.themeLight);
+
+  // counts + score + data window
+  const c={block:0,blockaudit:0,audit:0,nohits:0,none:0}; let score=0, lastSeen=null, firstSeen=null;
+  DATA.forEach(r=>{ const m=modeOf(r); c[m]++; score+=MODE_WEIGHT[m];
+    const dl=Date.parse(r.LastSeen); if(!isNaN(dl)&&(!lastSeen||dl>lastSeen))lastSeen=dl;
+    const df=Date.parse(r.FirstSeen); if(!isNaN(df)&&(!firstSeen||df<firstSeen))firstSeen=df; });
+  const pct=DATA.length?Math.round(score/DATA.length*100):0;
+  animatePct(pct);
+  const tot=DATA.length||1;
+  document.getElementById("segEnf").style.width=(c.block/tot*100)+"%";
+  document.getElementById("segTra").style.width=(c.blockaudit/tot*100)+"%";
+  document.getElementById("segAud").style.width=(c.audit/tot*100)+"%";
+  set("cEnf",c.block); set("cTra",c.blockaudit); set("cAud",c.audit); set("cNoh",c.nohits); set("cNon",c.none);
+  document.getElementById("lastUpdate").textContent = lastSeen ?
+    new Date(lastSeen).toLocaleString("en-GB",{dateStyle:"medium",timeStyle:"short"}) : "—";
+  // data window: earliest first-seen → latest last-seen + span in days
+  const dwEl=document.getElementById("dataWindow"), noteEl=document.getElementById("t-windownote");
+  if(firstSeen&&lastSeen){
+    const fmtD=t=>new Date(t).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
+    const spanDays=Math.max(1,Math.round((lastSeen-firstSeen)/86400000));
+    dwEl.textContent=`${fmtD(firstSeen)} – ${fmtD(lastSeen)} · ${spanDays} ${spanDays===1?T.day:T.days}`;
+    noteEl.textContent=T.windowNote(spanDays);
+  }else{ dwEl.textContent="—"; noteEl.textContent=""; }
+
+  // cards
+  const impLabel={high:T.iHigh,med:T.iMed,safe:T.iSafe};
+  const modeLabel={block:T.mBlock,blockaudit:T.mBlockAudit,audit:T.mAudit,nohits:T.mNoHits,none:T.mNone};
+  const modeColor={block:"#5fcf72",blockaudit:"#f1c469",audit:"#5d94d6",nohits:"#c7ccd4",none:"#4b515b"};
+  const recText={high:T.recHigh,med:T.recMed,safe:T.recSafe};
+
+  const list=document.getElementById("list"); list.innerHTML="";
+  if(!DATA.length){ list.innerHTML=`<div class="empty">${T.empty}</div>`; return; }
+  DATA.forEach((r,idx)=>{
+    const imp=impactOf(r), mode=modeOf(r), name=r.DisplayName||r.RuleName||"—";
+    const meta=RULES[name]||null;
+    const guid=meta?meta[0]:null;
+    const url=meta?`${MS_BASE}#${meta[1]}`:MS_BASE;
+    const procs=jsonList(r.SampleProcesses);
+    const devList=jsonList(r.AffectedDeviceList);
+    const hits=num(r.TotalHits), dev=num(r.AffectedDevices), up=num(r.UniqueProcesses);
+
+    const card=document.createElement("div");
+    card.className="card";
+    card.innerHTML=`
+      <div class="bar ${imp}"></div>
+      <div class="row" role="button" tabindex="0" aria-expanded="false">
+        <div class="grow">
+          <div class="name">${esc(name)}</div>
+          <div class="sub">${fmt(hits)} ${T.hits}<span class="sep">·</span>${fmt(dev)} ${T.devices}<span class="sep">·</span>${fmt(up)} ${T.processes}</div>
+        </div>
+        <span class="pill ${imp}">${impLabel[imp]}</span>
+        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      <div class="detail">
+        <div class="rec ${imp}">${recText[imp]}</div>
+        <div class="grid">
+          <div class="stat"><div class="k">${T.mode}</div><div class="v"><span class="modechip"><span class="md" style="background:${modeColor[mode]}"></span>${modeLabel[mode]}</span></div></div>
+          <div class="stat"><div class="k">${T.blocked}</div><div class="v">${fmt(num(r.BlockedCount))}</div></div>
+          <div class="stat"><div class="k">${T.audited}</div><div class="v">${fmt(num(r.AuditedCount))}</div></div>
+          <div class="stat"><div class="k">${T.affdev}</div><div class="v">${fmt(dev)}</div></div>
+          <div class="stat"><div class="k">${T.uproc}</div><div class="v">${fmt(up)}</div></div>
+        </div>
+        ${procs.length?`<div class="stat"><div class="k">${T.sample}</div><div class="procs">${procs.map(p=>`<span class="proc">${esc(p)}</span>`).join("")}</div></div>`:""}
+        ${devList.length?`<div class="stat" style="margin-top:14px"><div class="k">${T.affList} (${fmt(devList.length)}${devList.length>=100?"+":""})</div><div class="devs">${devList.map(d=>`<span class="dev">${esc(d)}</span>`).join("")}</div></div>`:""}
+        <div class="metarow">
+          <span class="seen">${T.first}: ${esc(r.FirstSeen||"—")} · ${T.last}: ${esc(r.LastSeen||"—")}</span>
+          <a class="mslink" href="${url}" target="_blank" rel="noopener">${T.mslink}
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg></a>
+        </div>
+        ${guid?`<div class="guid">${T.guid}: ${guid}</div>`:""}
+      </div>`;
+    const row=card.querySelector(".row");
+    const toggle=()=>{ card.classList.toggle("open"); row.setAttribute("aria-expanded",card.classList.contains("open")); };
+    row.addEventListener("click",toggle);
+    row.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();toggle();} });
+    list.appendChild(card);
+  });
+}
+function set(id,v){ const el=document.getElementById(id); if(el)el.textContent=v; }
+function animatePct(target){
+  const el=document.getElementById("pctNum"); let cur=0;
+  const step=()=>{ cur+=Math.max(1,Math.ceil((target-cur)/6)); if(cur>=target)cur=target;
+    el.textContent=cur+"%"; if(cur<target)requestAnimationFrame(step); };
+  requestAnimationFrame(step);
+}
+
+/* ============== CSV re-upload ============== */
+function toast(msg,err){
+  const t=document.getElementById("toast"); t.textContent=msg;
+  t.className="toast show"+(err?" err":""); setTimeout(()=>t.className="toast",2600);
+}
+function ingest(file){
+  const rd=new FileReader();
+  rd.onload=()=>{ try{
+      const rows=parseCSV(rd.result);
+      if(!rows.length||!(("DisplayName"in rows[0])||("RuleName"in rows[0]))) throw 0;
+      DATA=rows; render(); toast(STRINGS.okMsg(rows.length));
+    }catch{ toast(STRINGS.errMsg,true); } };
+  rd.readAsText(file);
+}
+const drop=document.getElementById("drop"), fileInput=document.getElementById("file");
+fileInput.addEventListener("change",e=>{ if(e.target.files[0])ingest(e.target.files[0]); e.target.value=""; });
+["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("drag");}));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("drag");}));
+drop.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f)ingest(f); });
+
+/* ============== clear tables ============== */
+document.getElementById("clear").addEventListener("click",()=>{
+  DATA=[]; render(); toast(STRINGS.cleared);
+});
+
+/* ============== theme toggle ============== */
+document.getElementById("theme").addEventListener("click",()=>{
+  const root=document.documentElement;
+  const light=root.getAttribute("data-theme")==="light";
+  if(light) root.removeAttribute("data-theme"); else root.setAttribute("data-theme","light");
+  document.getElementById("t-theme").textContent =
+    root.getAttribute("data-theme")==="light"?STRINGS.themeDark:STRINGS.themeLight;
+});
+
+/* ============== KQL disclosure ============== */
+(function(){
+  const kqlText=document.getElementById("kqlsrc").textContent.replace(/^\n/,"").replace(/\n$/,"");
+  const panel=document.getElementById("kql");
+  const code=document.getElementById("kqlCode");
+  const head=panel.querySelector(".kql-head");
+  code.textContent=kqlText;
+  const toggle=()=>{ panel.classList.toggle("open"); head.setAttribute("aria-expanded",panel.classList.contains("open")); };
+  head.addEventListener("click",toggle);
+  head.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();toggle();} });
+  const btn=document.getElementById("copyKql");
+  btn.addEventListener("click",async e=>{
+    e.stopPropagation();
+    try{ await navigator.clipboard.writeText(kqlText); }
+    catch{ const t=document.createElement("textarea");t.value=kqlText;document.body.appendChild(t);t.select();document.execCommand("copy");t.remove(); }
+    const lbl=document.getElementById("t-copy"), prev=lbl.textContent;
+    btn.classList.add("ok"); lbl.textContent=STRINGS.copied;
+    setTimeout(()=>{ btn.classList.remove("ok"); lbl.textContent=STRINGS.copy; },1600);
+  });
+})();
+
+/* ============== boot ============== */
+loadSeed(); render();
+</script>
+</body>
+</html>
