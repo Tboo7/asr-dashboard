@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Defender Security Tools</title>
+<style>
+:root{--bg:#0b1020;--bg2:#070a14;--panel:#121a2e;--text:#edf2ff;--muted:#9fb0d0;--border:rgba(255,255,255,.11);--blue:#58a6ff;--shadow:rgba(0,0,0,.25);--card-gradient:linear-gradient(180deg,rgba(255,255,255,.065),rgba(255,255,255,.025))}
+*{box-sizing:border-box}body{margin:0;font-family:Inter,Segoe UI,Roboto,Arial,sans-serif;background:radial-gradient(circle at top left,#1a2b52 0,var(--bg) 34%,var(--bg2) 100%);color:var(--text);min-height:100vh}.wrap{max-width:1050px;margin:auto;padding:56px 24px}h1{font-size:42px;margin:0;letter-spacing:-.04em}.sub{color:var(--muted);font-size:16px;margin:12px 0 30px}.grid{display:grid;grid-template-columns:repeat(2,minmax(260px,1fr));gap:18px}.card{background:var(--card-gradient);border:1px solid var(--border);border-radius:22px;padding:24px;box-shadow:0 18px 40px var(--shadow);color:var(--text);text-decoration:none}.card:hover{border-color:var(--blue);transform:translateY(-1px)}.card h2{margin:0 0 10px;font-size:23px}.card p{color:var(--muted);margin:0;line-height:1.55}.tag{display:inline-block;color:var(--blue);font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px}.footer{margin-top:28px;color:var(--muted);font-size:12px}@media(max-width:750px){.grid{grid-template-columns:1fr}h1{font-size:34px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Defender Security Tools</h1>
+  <div class="sub">Standalone browser-based tools for Microsoft Defender ASR readiness and recommendation analysis.</div>
+  <div class="grid">
+    <a class="card" href="asr-readiness.html"><span class="tag">CSV / KQL</span><h2>ASR Readiness Dashboard</h2><p>Upload ASR readiness CSV exports, review Block/Audit/Off coverage, telemetry, affected devices, and rollout status.</p></a>
+    <a class="card" href="recommendation-analyzer.html"><span class="tag">API JSON</span><h2>Defender Recommendation Analyzer</h2><p>Paste Microsoft Defender recommendations API responses and generate prioritized, practical remediation guidance.</p></a>
+  </div>
+  <div class="footer">All processing is local in your browser. No data is uploaded to any server.</div>
+</div>
+</body>
+</html>
