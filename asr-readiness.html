@@ -57,12 +57,13 @@ align-items:center;
   <div class="controls">
     <input id="search" type="text" placeholder="Search rule, config key, process, device...">
     <select id="status"><option value="">All statuses</option></select>
+    <select id="deviceType"><option value="">All endpoints</option><option value="Workstation">Workstations</option><option value="Server">Servers</option></select>
     <label class="filelabel">Upload CSV <input id="csvUpload" type="file" accept=".csv,text/csv" hidden></label>
     <button id="clearTable" type="button">Clear table</button>
     <button onclick="downloadCsv()">Export filtered CSV</button>
   </div>
   <div class="info">
-    <details><summary>How to read rollout status</summary><div class="note">Coverage bar = <b>Block</b> / <b>Audit</b> / <b>Off</b>. If <b>Audit coverage is 50%+</b> with low hits, the rule is marked <b>Ready candidate</b>. If <b>Block coverage is 80%+</b> with low audit impact, the rule is marked <b>Finish rollout</b>. If <b>Off coverage is above 50%</b>, the rule is marked <b>Needs better rollout</b>.</div></details>
+    <details><summary>How to read rollout status</summary><div class="note">Coverage bar = <b>Block</b> / <b>Audit</b> / <b>Off</b>. Use <b>Device type</b> to filter all endpoints, workstations, or servers. If <b>Audit coverage is 50%+</b> with low hits, the rule is marked <b>Ready candidate</b>. If <b>Block coverage is 80%+</b> with low audit impact, the rule is marked <b>Finish rollout</b>. If <b>Off coverage is above 50%</b>, the rule is marked <b>Needs better rollout</b>.</div></details>
     <details><summary>Show KQL used to generate the CSV</summary><div class="details-head"><span class="note">Use this query in Advanced Hunting, export to CSV, then upload it here.</span><button id="copyKql" class="copybtn" type="button">Copy KQL</button></div><pre id="kqlBlock">let AsrRules = datatable(ConfigKey: string, RuleId: string, RuleName: string) [
     &quot;VulnerableSignedDriver&quot;, &quot;56a863a9-875e-4185-98a7-b882c64b5ce5&quot;, &quot;Block abuse of exploited vulnerable signed drivers&quot;,
     &quot;AdobeReaderChildProcess&quot;, &quot;7674ba52-37eb-4a4f-a9a1-f0f9a1619a2c&quot;, &quot;Block Adobe Reader from creating child processes&quot;,
@@ -85,10 +86,16 @@ align-items:center;
 ];
 let Clients =
 DeviceInfo
-| where OSPlatform in (&quot;Windows10&quot;, &quot;Windows11&quot;)
 | where OnboardingStatus == &quot;Onboarded&quot;
+| where OSPlatform startswith &quot;Windows&quot;
 | summarize arg_max(Timestamp, *) by DeviceName
-| project DeviceName, OSPlatform;
+| extend DeviceType = case(
+    OSPlatform in (&quot;Windows10&quot;, &quot;Windows11&quot;), &quot;Workstation&quot;,
+    OSPlatform startswith &quot;WindowsServer&quot;, &quot;Server&quot;,
+    &quot;Other&quot;
+)
+| where DeviceType in (&quot;Workstation&quot;, &quot;Server&quot;)
+| project DeviceName, OSPlatform, DeviceType;
 let AsrConfig =
 Clients
 | join kind=leftouter (
@@ -107,7 +114,7 @@ Clients
     BlockConfiguredDevices = dcountif(DeviceName, ConfigMode == &quot;Block&quot;),
     AuditConfiguredDevices = dcountif(DeviceName, ConfigMode == &quot;Audit&quot;),
     OffDevices = dcountif(DeviceName, ConfigMode == &quot;Off&quot;)
-    by RuleId, RuleName, ConfigKey;
+    by RuleId, RuleName, ConfigKey, DeviceType;
 let AsrEvents =
 DeviceEvents
 | where DeviceName in (Clients | project DeviceName)
@@ -116,6 +123,7 @@ DeviceEvents
 | extend AF = parse_json(AdditionalFields)
 | extend RuleId = tolower(tostring(AF.RuleId))
 | extend Mode = iff(ActionType contains &quot;Blocked&quot;, &quot;Block&quot;, &quot;Audit&quot;)
+| join kind=leftouter (Clients | project DeviceName, DeviceType) on DeviceName
 | summarize
     TotalHits = count(),
     BlockedCount = countif(Mode == &quot;Block&quot;),
@@ -126,18 +134,21 @@ DeviceEvents
     SampleProcesses = make_set(InitiatingProcessFileName, 10),
     FirstSeen = min(Timestamp),
     LastSeen = max(Timestamp)
-    by RuleId;
+    by RuleId, DeviceType;
 AsrRules
-| join kind=leftouter AsrConfig on RuleId, RuleName, ConfigKey
-| join kind=leftouter AsrEvents on RuleId
+| extend JoinKey = 1
+| join kind=inner (datatable(DeviceType: string) [&quot;Workstation&quot;, &quot;Server&quot;] | extend JoinKey = 1) on JoinKey
+| project-away JoinKey, JoinKey1
+| join kind=leftouter AsrConfig on RuleId, RuleName, ConfigKey, DeviceType
+| join kind=leftouter AsrEvents on RuleId, DeviceType
 | extend
     TotalDevices = coalesce(TotalDevices, 0),
     BlockConfiguredDevices = coalesce(BlockConfiguredDevices, 0),
     AuditConfiguredDevices = coalesce(AuditConfiguredDevices, 0),
     OffDevices = coalesce(OffDevices, 0),
-    BlockPct = round(100.0 * BlockConfiguredDevices / TotalDevices, 1),
-    AuditPct = round(100.0 * AuditConfiguredDevices / TotalDevices, 1),
-    OffPct = round(100.0 * OffDevices / TotalDevices, 1),
+    BlockPct = iff(TotalDevices == 0, 0.0, round(100.0 * BlockConfiguredDevices / TotalDevices, 1)),
+    AuditPct = iff(TotalDevices == 0, 0.0, round(100.0 * AuditConfiguredDevices / TotalDevices, 1)),
+    OffPct = iff(TotalDevices == 0, 0.0, round(100.0 * OffDevices / TotalDevices, 1)),
     TotalHits = coalesce(TotalHits, 0),
     BlockedCount = coalesce(BlockedCount, 0),
     AuditedCount = coalesce(AuditedCount, 0),
@@ -156,21 +167,28 @@ AsrRules
     &quot;Review&quot;
 )
 | extend Recommendation = case(
-    OffPct &gt; 50, &quot;More than 50% of devices are Off for this rule — needs better rollout before readiness decision&quot;,
-    BlockPct &gt;= 99.95, &quot;Block mode is fully deployed — monitor for false positives&quot;,
-    BlockPct &gt;= 80 and AuditedCount &lt;= 50, strcat(&quot;Almost fully in Block mode — finish blocking the remaining &quot;, tostring(RemainingToBlock), &quot; Windows endpoint(s)&quot;),
-    AuditedCount &gt; 50, &quot;Audit enabled with significant hits — investigate before blocking&quot;,
-    AuditConfiguredDevices &gt; 0 and AuditedCount &gt; 0, &quot;Audit enabled with low hits — candidate for block after review&quot;,
-    AuditConfiguredDevices &gt; 0 and AuditedCount == 0, &quot;Audit enabled with no hits — likely good block candidate&quot;,
-    BlockConfiguredDevices &gt; 0 and BlockedCount &gt; 0, &quot;Block enabled and enforcing&quot;,
-    BlockConfiguredDevices &gt; 0 and BlockedCount == 0, &quot;Block enabled, no matching activity seen&quot;,
-    &quot;Review configuration&quot;
+    AuditedCount > 50, "Audit telemetry is significant — investigate before moving more devices to Block",
+    OffPct > 50, "More than 50% of devices are Off for this rule — increase policy coverage before readiness decision",
+    BlockPct >= 99.95, "Block mode is fully deployed — monitor for false positives",
+    BlockPct >= 80 and AuditedCount <= 50, strcat("Block mode is broadly deployed — finish blocking the remaining ", tostring(RemainingToBlock), " Windows endpoint(s)"),
+    AuditPct >= 50 and AuditedCount <= 50 and AuditedCount > 0, "Audit coverage is strong with low hits — candidate for Block after review",
+    AuditPct >= 50 and AuditedCount == 0, "Audit coverage is strong with no hits — likely good Block candidate",
+    BlockPct > 0 and OffPct > 0, "Rule is partially in Block mode, but remaining devices are Off/not protected — improve rollout coverage",
+    AuditConfiguredDevices > 0 or AuditPct > 0, "Audit enabled — review impact and consider Block",
+    BlockConfiguredDevices > 0 and OffPct == 0 and AuditPct == 0, "Block enabled — monitor for false positives",
+    "Review configuration"
 )
-| project RuleName, ConfigKey, TotalDevices, BlockConfiguredDevices, AuditConfiguredDevices, OffDevices, BlockPct, AuditPct, OffPct, Status, TotalHits, BlockedCount, AuditedCount, AffectedDevices, UniqueProcesses, Recommendation, SampleProcesses, AffectedDeviceList, FirstSeen, LastSeen
-| order by Status asc, AuditedCount desc, AffectedDevices desc</pre></details>
+| project
+    DeviceType, RuleName, ConfigKey, TotalDevices,
+    BlockConfiguredDevices, AuditConfiguredDevices, OffDevices,
+    BlockPct, AuditPct, OffPct, Status,
+    TotalHits, BlockedCount, AuditedCount,
+    AffectedDevices, UniqueProcesses, Recommendation,
+    SampleProcesses, AffectedDeviceList, FirstSeen, LastSeen
+| order by DeviceType asc, Status asc, AuditedCount desc, AffectedDevices desc</pre></details>
   </div>
   <div class="panel"><div class="tablewrap"><table id="tbl"><thead><tr>
-    <th data-k="RuleName">Rule</th><th data-k="Status">Status</th><th data-k="BlockPct">Coverage</th><th data-k="TotalHits">Hits</th><th data-k="AuditedCount">Audit</th><th data-k="BlockedCount">Block</th><th data-k="AffectedDevices">Affected devices</th><th data-k="UniqueProcesses">Processes</th><th data-k="LastSeen">Last seen</th>
+    <th data-k="RuleName">Rule</th><th data-k="DeviceType">Device type</th><th data-k="Status">Status</th><th data-k="BlockPct">Coverage</th><th data-k="TotalHits">Hits</th><th data-k="AuditedCount">Audit</th><th data-k="BlockedCount">Block</th><th data-k="AffectedDevices">Affected devices</th><th data-k="UniqueProcesses">Processes</th><th data-k="LastSeen">Last seen</th>
   </tr></thead><tbody></tbody></table></div></div>
   <div class="footer">Tip: click column headers to sort. Uploaded CSVs are processed locally in your browser; no upload to any server.</div>
 </div>
@@ -206,7 +224,7 @@ function n(x){return Number(x||0).toLocaleString();} function pct(x){return Numb
 function normalizeRow(r){numericCols.forEach(c=>r[c]=Number(String(r[c]??0).replace('%','').replace(',',''))||0); if(!r.BlockPct&&r.TotalDevices) r.BlockPct=100*r.BlockConfiguredDevices/r.TotalDevices; if(!r.AuditPct&&r.TotalDevices) r.AuditPct=100*r.AuditConfiguredDevices/r.TotalDevices; if(!r.OffPct&&r.TotalDevices) r.OffPct=100*r.OffDevices/r.TotalDevices; const remaining=Math.max(0,(r.TotalDevices||0)-(r.BlockConfiguredDevices||0)); if(r.AuditedCount>50){r.Status='High attention'; r.Recommendation='Audit telemetry is significant — investigate before moving more devices to Block';} else if(r.OffPct>50){r.Status='Needs better rollout'; r.Recommendation='More than 50% of devices are Off for this rule — increase policy coverage before readiness decision';} else if(r.BlockPct>=99.95){r.Status='Enforced/Monitor'; r.Recommendation='Block mode is fully deployed — monitor for false positives';} else if(r.BlockPct>=80 && r.AuditedCount<=50){r.Status='Finish rollout'; r.Recommendation=`Block mode is broadly deployed — finish blocking the remaining ${remaining} Windows endpoint(s)`;} else if(r.AuditPct>=50 && r.AuditedCount<=50){r.Status='Ready candidate'; r.Recommendation=r.AuditedCount>0?'Audit coverage is strong with low hits — candidate for Block after review':'Audit coverage is strong with no hits — likely good Block candidate';} else if(r.BlockPct>0 && r.OffPct>0){r.Status='Needs better rollout'; r.Recommendation='Rule is partially in Block mode, but remaining devices are Off/not protected — improve rollout coverage';} else if(r.AuditConfiguredDevices>0 || r.AuditPct>0){r.Status='Ready candidate'; r.Recommendation=r.AuditedCount>0?'Audit enabled with low hits — candidate for block after review':'Audit enabled with no hits — likely good block candidate';} else if(r.BlockConfiguredDevices>0 && r.OffPct===0 && r.AuditPct===0){r.Status='Enforced/Monitor'; r.Recommendation=r.BlockedCount>0?'Block enabled and enforcing':'Block enabled, no matching activity seen';} else {r.Status='Review'; if(!r.Recommendation) r.Recommendation='Review configuration';} return r;}
 rows = rows.map(normalizeRow);
 function statusClass(s){return s==='High attention'?'high':s==='Needs rollout'||s==='Needs better rollout'?'rollout':s==='Finish rollout'?'finish':s==='Ready candidate'?'ready':s==='Enforced/Monitor'?'monitor':'review';}
-function renderCards(){const totalDevices=Math.max(...rows.map(r=>r.TotalDevices||0),0); const avg=c=>rows.length?rows.reduce((a,r)=>a+(Number(r[c])||0),0)/rows.length:0; const counts=rows.reduce((a,r)=>{a[r.Status]=(a[r.Status]||0)+1;return a;},{}); const hits=rows.reduce((a,r)=>a+r.TotalHits,0), audits=rows.reduce((a,r)=>a+r.AuditedCount,0); const cards=[['Windows devices',n(totalDevices)],['ASR rules',n(rows.length)],['High attention',n(counts['High attention']||0)],['Ready candidates',n(counts['Ready candidate']||0)],['Finish rollout',n(counts['Finish rollout']||0)],['Needs better rollout',n(counts['Needs better rollout']||counts['Needs rollout']||0)],['Total ASR hits',n(hits)],['Audit hits',n(audits)],['Avg Block coverage',pct(avg('BlockPct'))],['Avg Audit coverage',pct(avg('AuditPct'))],['Avg Off coverage',pct(avg('OffPct'))]]; document.getElementById('cards').innerHTML=cards.map(c=>`<div class="card"><div class="metric">${c[1]}</div><div class="label">${c[0]}</div></div>`).join('');}
+function renderCards(){const totalDevices=Math.max(...rows.map(r=>r.TotalDevices||0),0); const avg=c=>rows.length?rows.reduce((a,r)=>a+(Number(r[c])||0),0)/rows.length:0; const counts=rows.reduce((a,r)=>{a[r.Status]=(a[r.Status]||0)+1;return a;},{}); const hits=rows.reduce((a,r)=>a+r.TotalHits,0), audits=rows.reduce((a,r)=>a+r.AuditedCount,0); const workstations=rows.filter(r=>r.DeviceType==='Workstation').length, servers=rows.filter(r=>r.DeviceType==='Server').length; const cards=[['Max Windows devices',n(totalDevices)],['ASR rows',n(rows.length)],['Workstation rows',n(workstations)],['Server rows',n(servers)],['High attention',n(counts['High attention']||0)],['Ready candidates',n(counts['Ready candidate']||0)],['Finish rollout',n(counts['Finish rollout']||0)],['Needs better rollout',n(counts['Needs better rollout']||counts['Needs rollout']||0)],['Total ASR hits',n(hits)],['Audit hits',n(audits)],['Avg Block coverage',pct(avg('BlockPct'))],['Avg Audit coverage',pct(avg('AuditPct'))],['Avg Off coverage',pct(avg('OffPct'))]]; document.getElementById('cards').innerHTML=cards.map(c=>`<div class="card"><div class="metric">${c[1]}</div><div class="label">${c[0]}</div></div>`).join('');}
 function parseList(value){
   if(value==null || value==='') return [];
   if(Array.isArray(value)) return value.map(String).filter(Boolean);
@@ -232,13 +250,14 @@ function refreshStatusOptions(){const sel=document.getElementById('status'); con
 function render(){
   const tb=document.querySelector('#tbl tbody');
   if(!filtered.length){
-    tb.innerHTML='<tr class="emptyrow"><td colspan="9">No rows to display. Upload a CSV or adjust filters.</td></tr>';
+    tb.innerHTML='<tr class="emptyrow"><td colspan="10">No rows to display. Upload a CSV or adjust filters.</td></tr>';
     return;
   }
   tb.innerHTML=filtered.map((r,i)=>{
     const id='detail_'+i+'_'+String(r.ConfigKey||'rule').replace(/[^a-z0-9_-]/gi,'');
     return `<tr class="asrrow" onclick="toggleDetail('${id}')">
       <td class="rule"><strong><span class="chev">▶</span><span>${safe(r.RuleName)}</span></strong><div class="configkey">${safe(r.ConfigKey)}</div></td>
+      <td><span class="pill review">${safe(r.DeviceType||"Endpoint")}</span></td>
       <td><span class="pill ${statusClass(r.Status)}">${safe(r.Status)}</span></td>
       <td><div class="stack" title="Block ${pct(r.BlockPct)} | Audit ${pct(r.AuditPct)} | Off ${pct(r.OffPct)}"><div class="seg block" style="width:${Math.max(0,Math.min(100,r.BlockPct))}%"></div><div class="seg audit" style="width:${Math.max(0,Math.min(100,r.AuditPct))}%"></div><div class="seg off" style="width:${Math.max(0,Math.min(100,r.OffPct))}%"></div></div><div class="legend">B ${pct(r.BlockPct)} · A ${pct(r.AuditPct)} · Off ${pct(r.OffPct)}</div></td>
       <td class="num">${n(r.TotalHits)}</td>
@@ -248,7 +267,7 @@ function render(){
       <td><div class="num">${n(r.UniqueProcesses)}</div><div class="details" title="${safe(r.SampleProcesses)}">${safe(parseList(r.SampleProcesses).slice(0,3).join(', ')||'—')}</div></td>
       <td class="num">${safe(r.LastSeen&&r.LastSeen!=='Invalid date'?r.LastSeen:'—')}</td>
     </tr>
-    <tr id="${id}" class="detailrow"><td class="detailcell" colspan="9">
+    <tr id="${id}" class="detailrow"><td class="detailcell" colspan="10">
       <div class="mini">
         <div class="m"><div class="mv">${n(r.BlockConfiguredDevices)}</div><div class="mk">Block devices</div></div>
         <div class="m"><div class="mv">${n(r.AuditConfiguredDevices)}</div><div class="mk">Audit devices</div></div>
@@ -262,7 +281,7 @@ function render(){
     </td></tr>`;
   }).join('');
 }
-function applyFilters(){const q=document.getElementById('search').value.toLowerCase(), st=document.getElementById('status').value; filtered=rows.filter(r=>(!st||r.Status===st)&&(!q||Object.values(r).join(' ').toLowerCase().includes(q))); sortRows();}
+function applyFilters(){const q=document.getElementById('search').value.toLowerCase(), st=document.getElementById('status').value, dt=document.getElementById('deviceType').value; filtered=rows.filter(r=>(!st||r.Status===st)&&(!dt||r.DeviceType===dt)&&(!q||Object.values(r).join(' ').toLowerCase().includes(q))); sortRows();}
 function sortRows(){const order={'High attention':0,'Needs better rollout':1,'Needs rollout':1,'Finish rollout':2,'Ready candidate':3,'Enforced/Monitor':4,'Review':5}; filtered.sort((a,b)=>{let av=a[sortKey],bv=b[sortKey]; if(sortKey==='Status'){av=order[av]??9;bv=order[bv]??9;} else if(!isNaN(Number(av))&&!isNaN(Number(bv))){av=Number(av);bv=Number(bv);} else {av=String(av??'');bv=String(bv??'');} return av>bv?sortDir:av<bv?-sortDir:0;}); render();}
 function parseCSV(text){
   const out=[]; let row=[], cell='', quoted=false;
@@ -302,7 +321,7 @@ document.getElementById('csvUpload').addEventListener('change',e=>{
   };
   reader.readAsText(f);
 });
-document.getElementById('search').addEventListener('input',applyFilters); document.getElementById('status').addEventListener('change',applyFilters); document.querySelectorAll('th[data-k]').forEach(th=>th.addEventListener('click',()=>{const k=th.dataset.k;if(sortKey===k)sortDir*=-1;else{sortKey=k;sortDir=k==='RuleName'?1:-1;}sortRows();}));
+document.getElementById('search').addEventListener('input',applyFilters); document.getElementById('status').addEventListener('change',applyFilters); document.getElementById('deviceType').addEventListener('change',applyFilters); document.querySelectorAll('th[data-k]').forEach(th=>th.addEventListener('click',()=>{const k=th.dataset.k;if(sortKey===k)sortDir*=-1;else{sortKey=k;sortDir=k==='RuleName'?1:-1;}sortRows();}));
 function downloadCsv(){
   if(!filtered.length) return;
   const cols=Object.keys(rows[0]);
@@ -324,6 +343,7 @@ document.getElementById('clearTable').addEventListener('click',()=>{
   filtered=[];
   document.getElementById('search').value='';
   document.getElementById('status').value='';
+  document.getElementById('deviceType').value='';
   document.getElementById('csvUpload').value='';
   document.getElementById('subtitle').textContent='No data loaded. Upload an ASR readiness CSV to populate the dashboard.';
   renderCards();
