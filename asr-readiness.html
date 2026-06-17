@@ -31,11 +31,28 @@ tbody tr.asrrow{cursor:pointer} tbody tr.detailrow{cursor:default}
 @media(max-width:900px){.detailgrid{grid-template-columns:1fr}.mini{grid-template-columns:repeat(2,1fr)}}
 
 @media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}header,.wrap{padding-left:16px;padding-right:16px}}
+
+.nav a{
+background:var(--button);
+color:var(--text);
+border:1px solid var(--border);
+border-radius:12px;
+padding:11px 14px;
+font-size:13px;
+font-weight:700;
+display:inline-flex;
+align-items:center;
+}
 </style>
 </head>
 <body>
 <header><div class="headerbar"><div><h1>ASR Readiness Dashboard</h1><div class="sub" id="subtitle">No data loaded. Upload an ASR readiness CSV to populate the dashboard.</div></div><button id="themeToggle">☀️ Light theme</button></div></header>
 <div class="wrap">
+  <div class="nav" style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 18px">
+    <a href="index.html" style="text-decoration:none">🏠 Home</a>
+    <a href="recommendation-analyzer.html" style="text-decoration:none">🛡️ Recommendation Analyzer</a>
+  </div>
+
   <div class="grid" id="cards"></div>
   <div class="controls">
     <input id="search" type="text" placeholder="Search rule, config key, process, device...">
@@ -45,7 +62,7 @@ tbody tr.asrrow{cursor:pointer} tbody tr.detailrow{cursor:default}
     <button onclick="downloadCsv()">Export filtered CSV</button>
   </div>
   <div class="info">
-    <details><summary>How to read rollout status</summary><div class="note">Coverage bar = <b>Block</b> / <b>Audit</b> / <b>Off</b>. If <b>Audit coverage is 50%+</b> with low hits, the rule is marked <b>Ready candidate</b>. If <b>Block coverage is 90%+</b> with low audit impact, the rule is marked <b>Finish rollout</b>. If <b>Off coverage is above 50%</b>, the rule is marked <b>Needs better rollout</b>.</div></details>
+    <details><summary>How to read rollout status</summary><div class="note">Coverage bar = <b>Block</b> / <b>Audit</b> / <b>Off</b>. If <b>Audit coverage is 50%+</b> with low hits, the rule is marked <b>Ready candidate</b>. If <b>Block coverage is 80%+</b> with low audit impact, the rule is marked <b>Finish rollout</b>. If <b>Off coverage is above 50%</b>, the rule is marked <b>Needs better rollout</b>.</div></details>
     <details><summary>Show KQL used to generate the CSV</summary><div class="details-head"><span class="note">Use this query in Advanced Hunting, export to CSV, then upload it here.</span><button id="copyKql" class="copybtn" type="button">Copy KQL</button></div><pre id="kqlBlock">let AsrRules = datatable(ConfigKey: string, RuleId: string, RuleName: string) [
     &quot;VulnerableSignedDriver&quot;, &quot;56a863a9-875e-4185-98a7-b882c64b5ce5&quot;, &quot;Block abuse of exploited vulnerable signed drivers&quot;,
     &quot;AdobeReaderChildProcess&quot;, &quot;7674ba52-37eb-4a4f-a9a1-f0f9a1619a2c&quot;, &quot;Block Adobe Reader from creating child processes&quot;,
@@ -131,7 +148,7 @@ AsrRules
     AuditedCount &gt; 50, &quot;High attention&quot;,
     OffPct &gt; 50, &quot;Needs better rollout&quot;,
     BlockPct &gt;= 99.95, &quot;Enforced/Monitor&quot;,
-    BlockPct &gt;= 90 and AuditedCount &lt;= 50, &quot;Finish rollout&quot;,
+    BlockPct &gt;= 80 and AuditedCount &lt;= 50, &quot;Finish rollout&quot;,
     AuditPct &gt;= 50 and AuditedCount &lt;= 50, &quot;Ready candidate&quot;,
     BlockPct &gt; 0 and OffPct &gt; 0, &quot;Needs better rollout&quot;,
     AuditConfiguredDevices &gt; 0 or AuditPct &gt; 0, &quot;Ready candidate&quot;,
@@ -141,7 +158,7 @@ AsrRules
 | extend Recommendation = case(
     OffPct &gt; 50, &quot;More than 50% of devices are Off for this rule — needs better rollout before readiness decision&quot;,
     BlockPct &gt;= 99.95, &quot;Block mode is fully deployed — monitor for false positives&quot;,
-    BlockPct &gt;= 90 and AuditedCount &lt;= 50, strcat(&quot;Almost fully in Block mode — finish blocking the remaining &quot;, tostring(RemainingToBlock), &quot; Windows endpoint(s)&quot;),
+    BlockPct &gt;= 80 and AuditedCount &lt;= 50, strcat(&quot;Almost fully in Block mode — finish blocking the remaining &quot;, tostring(RemainingToBlock), &quot; Windows endpoint(s)&quot;),
     AuditedCount &gt; 50, &quot;Audit enabled with significant hits — investigate before blocking&quot;,
     AuditConfiguredDevices &gt; 0 and AuditedCount &gt; 0, &quot;Audit enabled with low hits — candidate for block after review&quot;,
     AuditConfiguredDevices &gt; 0 and AuditedCount == 0, &quot;Audit enabled with no hits — likely good block candidate&quot;,
@@ -186,7 +203,7 @@ function copyKql(){
 function fallbackCopy(text, done){const ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.left='-9999px';document.body.appendChild(ta);ta.focus();ta.select();try{document.execCommand('copy');done();}finally{document.body.removeChild(ta);}}
 document.getElementById('copyKql').addEventListener('click', copyKql);
 function n(x){return Number(x||0).toLocaleString();} function pct(x){return Number(x||0).toFixed(1)+'%';} function safe(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
-function normalizeRow(r){numericCols.forEach(c=>r[c]=Number(String(r[c]??0).replace('%','').replace(',',''))||0); if(!r.BlockPct&&r.TotalDevices) r.BlockPct=100*r.BlockConfiguredDevices/r.TotalDevices; if(!r.AuditPct&&r.TotalDevices) r.AuditPct=100*r.AuditConfiguredDevices/r.TotalDevices; if(!r.OffPct&&r.TotalDevices) r.OffPct=100*r.OffDevices/r.TotalDevices; const remaining=Math.max(0,(r.TotalDevices||0)-(r.BlockConfiguredDevices||0)); if(r.AuditedCount>50){r.Status='High attention'; r.Recommendation='Audit telemetry is significant — investigate before moving more devices to Block';} else if(r.OffPct>50){r.Status='Needs better rollout'; r.Recommendation='More than 50% of devices are Off for this rule — increase policy coverage before readiness decision';} else if(r.BlockPct>=99.95){r.Status='Enforced/Monitor'; r.Recommendation='Block mode is fully deployed — monitor for false positives';} else if(r.BlockPct>=90 && r.AuditedCount<=50){r.Status='Finish rollout'; r.Recommendation=`Block mode is broadly deployed — finish blocking the remaining ${remaining} Windows endpoint(s)`;} else if(r.AuditPct>=50 && r.AuditedCount<=50){r.Status='Ready candidate'; r.Recommendation=r.AuditedCount>0?'Audit coverage is strong with low hits — candidate for Block after review':'Audit coverage is strong with no hits — likely good Block candidate';} else if(r.BlockPct>0 && r.OffPct>0){r.Status='Needs better rollout'; r.Recommendation='Rule is partially in Block mode, but remaining devices are Off/not protected — improve rollout coverage';} else if(r.AuditConfiguredDevices>0 || r.AuditPct>0){r.Status='Ready candidate'; r.Recommendation=r.AuditedCount>0?'Audit enabled with low hits — candidate for block after review':'Audit enabled with no hits — likely good block candidate';} else if(r.BlockConfiguredDevices>0 && r.OffPct===0 && r.AuditPct===0){r.Status='Enforced/Monitor'; r.Recommendation=r.BlockedCount>0?'Block enabled and enforcing':'Block enabled, no matching activity seen';} else {r.Status='Review'; if(!r.Recommendation) r.Recommendation='Review configuration';} return r;}
+function normalizeRow(r){numericCols.forEach(c=>r[c]=Number(String(r[c]??0).replace('%','').replace(',',''))||0); if(!r.BlockPct&&r.TotalDevices) r.BlockPct=100*r.BlockConfiguredDevices/r.TotalDevices; if(!r.AuditPct&&r.TotalDevices) r.AuditPct=100*r.AuditConfiguredDevices/r.TotalDevices; if(!r.OffPct&&r.TotalDevices) r.OffPct=100*r.OffDevices/r.TotalDevices; const remaining=Math.max(0,(r.TotalDevices||0)-(r.BlockConfiguredDevices||0)); if(r.AuditedCount>50){r.Status='High attention'; r.Recommendation='Audit telemetry is significant — investigate before moving more devices to Block';} else if(r.OffPct>50){r.Status='Needs better rollout'; r.Recommendation='More than 50% of devices are Off for this rule — increase policy coverage before readiness decision';} else if(r.BlockPct>=99.95){r.Status='Enforced/Monitor'; r.Recommendation='Block mode is fully deployed — monitor for false positives';} else if(r.BlockPct>=80 && r.AuditedCount<=50){r.Status='Finish rollout'; r.Recommendation=`Block mode is broadly deployed — finish blocking the remaining ${remaining} Windows endpoint(s)`;} else if(r.AuditPct>=50 && r.AuditedCount<=50){r.Status='Ready candidate'; r.Recommendation=r.AuditedCount>0?'Audit coverage is strong with low hits — candidate for Block after review':'Audit coverage is strong with no hits — likely good Block candidate';} else if(r.BlockPct>0 && r.OffPct>0){r.Status='Needs better rollout'; r.Recommendation='Rule is partially in Block mode, but remaining devices are Off/not protected — improve rollout coverage';} else if(r.AuditConfiguredDevices>0 || r.AuditPct>0){r.Status='Ready candidate'; r.Recommendation=r.AuditedCount>0?'Audit enabled with low hits — candidate for block after review':'Audit enabled with no hits — likely good block candidate';} else if(r.BlockConfiguredDevices>0 && r.OffPct===0 && r.AuditPct===0){r.Status='Enforced/Monitor'; r.Recommendation=r.BlockedCount>0?'Block enabled and enforcing':'Block enabled, no matching activity seen';} else {r.Status='Review'; if(!r.Recommendation) r.Recommendation='Review configuration';} return r;}
 rows = rows.map(normalizeRow);
 function statusClass(s){return s==='High attention'?'high':s==='Needs rollout'||s==='Needs better rollout'?'rollout':s==='Finish rollout'?'finish':s==='Ready candidate'?'ready':s==='Enforced/Monitor'?'monitor':'review';}
 function renderCards(){const totalDevices=Math.max(...rows.map(r=>r.TotalDevices||0),0); const avg=c=>rows.length?rows.reduce((a,r)=>a+(Number(r[c])||0),0)/rows.length:0; const counts=rows.reduce((a,r)=>{a[r.Status]=(a[r.Status]||0)+1;return a;},{}); const hits=rows.reduce((a,r)=>a+r.TotalHits,0), audits=rows.reduce((a,r)=>a+r.AuditedCount,0); const cards=[['Windows devices',n(totalDevices)],['ASR rules',n(rows.length)],['High attention',n(counts['High attention']||0)],['Ready candidates',n(counts['Ready candidate']||0)],['Finish rollout',n(counts['Finish rollout']||0)],['Needs better rollout',n(counts['Needs better rollout']||counts['Needs rollout']||0)],['Total ASR hits',n(hits)],['Audit hits',n(audits)],['Avg Block coverage',pct(avg('BlockPct'))],['Avg Audit coverage',pct(avg('AuditPct'))],['Avg Off coverage',pct(avg('OffPct'))]]; document.getElementById('cards').innerHTML=cards.map(c=>`<div class="card"><div class="metric">${c[1]}</div><div class="label">${c[0]}</div></div>`).join('');}
